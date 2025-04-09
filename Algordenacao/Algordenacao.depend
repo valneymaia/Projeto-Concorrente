@@ -1,0 +1,7 @@
+# depslib dependency file v1.0
+1743594942 source:c:\users\maia\desktop\cc-concorrente\algordenacao\main.c
+	<stdio.h>
+	<stdlib.h>
+	<omp.h>
+	<time.h>
+
