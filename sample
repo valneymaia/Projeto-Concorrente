@@ -1,0 +1,172 @@
+#include <stdio.h> #include <stdlib.h> #include <mpi.h>
+
+int compare(const void *a, const void b) { return ((int *)a - *(int *)b); }
+
+void sample_sort(int *data, int total_size, int rank, int size) { int local_size = total_size / size; int *local_data = (int *)malloc(local_size * sizeof(int));
+
+MPI_Scatter(data, local_size, MPI_INT, local_data, local_size, MPI_INT, 0, MPI_COMM_WORLD);
+
+qsort(local_data, local_size, sizeof(int), compare);
+
+int sample_count = size - 1;
+int *samples = (int *)malloc(sample_count * sizeof(int));
+
+for (int i = 0; i < sample_count; i++) {
+    samples[i] = local_data[(i + 1) * local_size / size];
+}
+
+int *gathered_samples = NULL;
+if (rank == 0) {
+    gathered_samples = (int *)malloc(sample_count * size * sizeof(int));
+}
+
+MPI_Gather(samples, sample_count, MPI_INT, gathered_samples, sample_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+int *pivots = (int *)malloc((size - 1) * sizeof(int));
+if (rank == 0) {
+    qsort(gathered_samples, sample_count * size, sizeof(int), compare);
+    for (int i = 0; i < size - 1; i++) {
+        pivots[i] = gathered_samples[(i + 1) * sample_count];
+    }
+}
+
+MPI_Bcast(pivots, size - 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+int **buckets = (int **)malloc(size * sizeof(int *));
+int *bucket_sizes = (int *)calloc(size, sizeof(int));
+
+for (int i = 0; i < local_size; i++) {
+    int value = local_data[i];
+    int bucket = 0;
+    while (bucket < size - 1 && value > pivots[bucket]) {
+        bucket++;
+    }
+    bucket_sizes[bucket]++;
+}
+
+for (int i = 0; i < size; i++) {
+    buckets[i] = (int *)malloc(bucket_sizes[i] * sizeof(int));
+    bucket_sizes[i] = 0;
+}
+
+for (int i = 0; i < local_size; i++) {
+    int value = local_data[i];
+    int bucket = 0;
+    while (bucket < size - 1 && value > pivots[bucket]) {
+        bucket++;
+    }
+    buckets[bucket][bucket_sizes[bucket]++] = value;
+}
+
+int *send_counts = (int *)malloc(size * sizeof(int));
+int *recv_counts = (int *)malloc(size * sizeof(int));
+
+for (int i = 0; i < size; i++) {
+    send_counts[i] = bucket_sizes[i];
+}
+
+MPI_Alltoall(send_counts, 1, MPI_INT, recv_counts, 1, MPI_INT, MPI_COMM_WORLD);
+
+int *send_displs = (int *)malloc(size * sizeof(int));
+int *recv_displs = (int *)malloc(size * sizeof(int));
+
+send_displs[0] = recv_displs[0] = 0;
+for (int i = 1; i < size; i++) {
+    send_displs[i] = send_displs[i - 1] + send_counts[i - 1];
+    recv_displs[i] = recv_displs[i - 1] + recv_counts[i - 1];
+}
+
+int total_recv = 0;
+for (int i = 0; i < size; i++) {
+    total_recv += recv_counts[i];
+}
+
+int *recv_buf = (int *)malloc(total_recv * sizeof(int));
+int *send_buf = (int *)malloc(local_size * sizeof(int));
+int pos = 0;
+for (int i = 0; i < size; i++) {
+    for (int j = 0; j < send_counts[i]; j++) {
+        send_buf[pos++] = buckets[i][j];
+    }
+}
+
+MPI_Alltoallv(send_buf, send_counts, send_displs, MPI_INT,
+              recv_buf, recv_counts, recv_displs, MPI_INT, MPI_COMM_WORLD);
+
+qsort(recv_buf, total_recv, sizeof(int), compare);
+
+if (rank == 0) {
+    int *sorted = (int *)malloc(total_size * sizeof(int));
+    int *recv_sizes = (int *)malloc(size * sizeof(int));
+    int *recv_offsets = (int *)malloc(size * sizeof(int));
+
+    MPI_Gather(&total_recv, 1, MPI_INT, recv_sizes, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    recv_offsets[0] = 0;
+    for (int i = 1; i < size; i++) {
+        recv_offsets[i] = recv_offsets[i - 1] + recv_sizes[i - 1];
+    }
+
+    MPI_Gatherv(recv_buf, total_recv, MPI_INT,
+                sorted, recv_sizes, recv_offsets, MPI_INT, 0, MPI_COMM_WORLD);
+
+    printf("Ordenado com sucesso (primeiros 10 elementos):\n");
+    for (int i = 0; i < 10 && i < total_size; i++) {
+        printf("%d ", sorted[i]);
+    }
+    printf("\n");
+
+    free(sorted);
+    free(recv_sizes);
+    free(recv_offsets);
+} else {
+    MPI_Gather(&total_recv, 1, MPI_INT, NULL, 0, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(recv_buf, total_recv, MPI_INT,
+                NULL, NULL, NULL, MPI_INT, 0, MPI_COMM_WORLD);
+}
+
+// Libera memória
+free(local_data);
+free(samples);
+free(gathered_samples);
+free(pivots);
+for (int i = 0; i < size; i++) {
+    free(buckets[i]);
+}
+free(buckets);
+free(bucket_sizes);
+free(send_counts);
+free(recv_counts);
+free(send_displs);
+free(recv_displs);
+free(send_buf);
+free(recv_buf);
+
+}
+
+int main(int argc, char *argv[]) { int rank, size; MPI_Init(&argc, &argv); MPI_Comm_rank(MPI_COMM_WORLD, &rank); MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+int total_size = 1000000; // 1 milhão
+int *data = NULL;
+if (rank == 0) {
+    data = (int *)malloc(total_size * sizeof(int));
+    srand(42);
+    for (int i = 0; i < total_size; i++) {
+        data[i] = rand();
+    }
+}
+
+double start = MPI_Wtime();
+sample_sort(data, total_size, rank, size);
+double end = MPI_Wtime();
+
+if (rank == 0) {
+    printf("Tempo de execução: %.4f segundos\n", end - start);
+    free(data);
+}
+
+MPI_Finalize();
+return 0;
+
+}
+
