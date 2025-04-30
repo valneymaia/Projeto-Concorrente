@@ -3,16 +3,16 @@
 #include <mpi.h>
 
 void swap(int *a, int *b) {
-    int tmp = *a;
+    int temp = *a;
     *a = *b;
-    *b = tmp;
+    *b = temp;
 }
 
-int partition(int arr[], int low, int high) {
+int partition(int *arr, int low, int high) {
     int pivot = arr[high];
     int i = low - 1;
     for (int j = low; j < high; j++) {
-        if (arr[j] < pivot) {
+        if (arr[j] <= pivot) {
             i++;
             swap(&arr[i], &arr[j]);
         }
@@ -21,7 +21,7 @@ int partition(int arr[], int low, int high) {
     return i + 1;
 }
 
-void quicksort(int arr[], int low, int high) {
+void quicksort(int *arr, int low, int high) {
     if (low < high) {
         int pi = partition(arr, low, high);
         quicksort(arr, low, pi - 1);
@@ -29,52 +29,81 @@ void quicksort(int arr[], int low, int high) {
     }
 }
 
-int compare(const void *a, const void *b) {
-    return (*(int *)a - *(int *)b);
+// Função recursiva de QuickSort com MPI
+void parallel_quicksort(int *arr, int n, int rank, int num_procs, int level) {
+    int partner = rank + (1 << level);
+    if (partner >= num_procs || n <= 10000) {
+        quicksort(arr, 0, n - 1);
+        return;
+    }
+
+    int pivot = arr[n - 1];
+    int i = -1;
+    for (int j = 0; j < n - 1; j++) {
+        if (arr[j] <= pivot) {
+            i++;
+            swap(&arr[i], &arr[j]);
+        }
+    }
+    swap(&arr[i + 1], &arr[n - 1]);
+
+    int mid = i + 1;
+    int right_size = n - mid - 1;
+
+    // Envia parte direita para o parceiro
+    MPI_Send(&right_size, 1, MPI_INT, partner, 0, MPI_COMM_WORLD);
+    MPI_Send(&arr[mid + 1], right_size, MPI_INT, partner, 0, MPI_COMM_WORLD);
+
+    // Ordena parte esquerda localmente (e recursivamente)
+    parallel_quicksort(arr, mid + 1, rank, num_procs, level + 1);
+
+    // Recebe parte ordenada do parceiro
+    MPI_Recv(&arr[mid + 1], right_size, MPI_INT, partner, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 }
 
 int main(int argc, char *argv[]) {
-    int rank, size;
-    int n = 1000000; // tamanho do vetor
-    int *data = NULL;
-    double start_time, end_time;
+    int rank, num_procs;
+    const int N = 1000000;
+    int *arr = NULL;
 
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
 
-    int local_n = n / size;
-    int *local_data = (int *)malloc(local_n * sizeof(int));
+    int size;
 
     if (rank == 0) {
-        data = (int *)malloc(n * sizeof(int));
-        srand(0);
-        for (int i = 0; i < n; i++) {
-            data[i] = rand() % 1000000;
+        arr = (int *)malloc(sizeof(int) * N);
+        srand(42);
+        for (int i = 0; i < N; i++) {
+            arr[i] = rand() % 1000000;
         }
-        start_time = MPI_Wtime();
+        double start = MPI_Wtime();
+        parallel_quicksort(arr, N, rank, num_procs, 0);
+        double end = MPI_Wtime();
+        printf("Tempo MPI QuickSort: %.6f segundos\n", end - start);
+
+        // Verificação simples
+        for (int i = 1; i < N; i++) {
+            if (arr[i] < arr[i - 1]) {
+                printf("Erro na ordenação!\n");
+                break;
+            }
+        }
+
+        free(arr);
+    } else {
+        MPI_Status status;
+        MPI_Recv(&size, 1, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
+        int *recv_data = (int *)malloc(size * sizeof(int));
+        MPI_Recv(recv_data, size, MPI_INT, status.MPI_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        parallel_quicksort(recv_data, size, rank, num_procs, 0);
+
+        MPI_Send(recv_data, size, MPI_INT, status.MPI_SOURCE, 0, MPI_COMM_WORLD);
+        free(recv_data);
     }
 
-    MPI_Scatter(data, local_n, MPI_INT, local_data, local_n, MPI_INT, 0, MPI_COMM_WORLD);
-
-    quicksort(local_data, 0, local_n - 1);
-
-    int *sorted = NULL;
-    if (rank == 0) {
-        sorted = (int *)malloc(n * sizeof(int));
-    }
-
-    MPI_Gather(local_data, local_n, MPI_INT, sorted, local_n, MPI_INT, 0, MPI_COMM_WORLD);
-
-    if (rank == 0) {
-        qsort(sorted, n, sizeof(int), compare);
-        end_time = MPI_Wtime();
-        printf("Tempo total com MPI + QuickSort local + merge final: %.6f segundos\n", end_time - start_time);
-        free(sorted);
-        free(data);
-    }
-
-    free(local_data);
     MPI_Finalize();
     return 0;
 }
