@@ -1,0 +1,80 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <mpi.h>
+
+void swap(int *a, int *b) {
+    int tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+int partition(int arr[], int low, int high) {
+    int pivot = arr[high];
+    int i = low - 1;
+    for (int j = low; j < high; j++) {
+        if (arr[j] < pivot) {
+            i++;
+            swap(&arr[i], &arr[j]);
+        }
+    }
+    swap(&arr[i + 1], &arr[high]);
+    return i + 1;
+}
+
+void quicksort(int arr[], int low, int high) {
+    if (low < high) {
+        int pi = partition(arr, low, high);
+        quicksort(arr, low, pi - 1);
+        quicksort(arr, pi + 1, high);
+    }
+}
+
+int compare(const void *a, const void *b) {
+    return (*(int *)a - *(int *)b);
+}
+
+int main(int argc, char *argv[]) {
+    int rank, size;
+    int n = 1000000; // tamanho do vetor
+    int *data = NULL;
+    double start_time, end_time;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    int local_n = n / size;
+    int *local_data = (int *)malloc(local_n * sizeof(int));
+
+    if (rank == 0) {
+        data = (int *)malloc(n * sizeof(int));
+        srand(0);
+        for (int i = 0; i < n; i++) {
+            data[i] = rand() % 1000000;
+        }
+        start_time = MPI_Wtime();
+    }
+
+    MPI_Scatter(data, local_n, MPI_INT, local_data, local_n, MPI_INT, 0, MPI_COMM_WORLD);
+
+    quicksort(local_data, 0, local_n - 1);
+
+    int *sorted = NULL;
+    if (rank == 0) {
+        sorted = (int *)malloc(n * sizeof(int));
+    }
+
+    MPI_Gather(local_data, local_n, MPI_INT, sorted, local_n, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        qsort(sorted, n, sizeof(int), compare);
+        end_time = MPI_Wtime();
+        printf("Tempo total com MPI + QuickSort local + merge final: %.6f segundos\n", end_time - start_time);
+        free(sorted);
+        free(data);
+    }
+
+    free(local_data);
+    MPI_Finalize();
+    return 0;
+}
