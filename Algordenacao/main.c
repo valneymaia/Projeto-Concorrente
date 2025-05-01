@@ -6,80 +6,6 @@
 #define THRESHOLD 1000  // Limite mínimo para paralelismo
 
 
-void selectionSortSerial(int arr[], int n) {
-    int i, j, minIdx, temp;
-
-    for (i = 0; i < n - 1; i++) {
-        minIdx = i;
-        for (j = i + 1; j < n; j++) {
-            if (arr[j] < arr[minIdx]) {
-                minIdx = j;
-            }
-        }
-
-        temp = arr[minIdx];
-        arr[minIdx] = arr[i];
-        arr[i] = temp;
-    }
-}
-
-// Versão paralela do Selection Sort
-void selectionSortParalelo(int arr[], int n) {
-    int i, j, minIdx, maxIdx, temp;
-    int metade = n / 2;
-
-    #pragma omp parallel
-    {
-        for (i = 0; i < metade; i++) {
-            minIdx = i;
-            maxIdx = n - i - 1;
-
-            #pragma omp single nowait
-            {
-
-                #pragma omp task shared(minIdx)
-                //#pragma omp task
-                {
-                    for (j = i + 1; j < n - i; j++) {
-                        if (arr[j] < arr[minIdx]) {
-                            minIdx = j;
-                        }
-                    }
-                }
-
-
-                #pragma omp task shared(maxIdx)
-                //#pragma omp task
-                {
-                    for (j = i; j < n - i - 1; j++) {
-                        if (arr[j] > arr[maxIdx]) {
-                            maxIdx = j;
-                        }
-                    }
-                }
-
-                #pragma omp taskwait
-
-                if (minIdx != i) {
-                    temp = arr[i];
-                    arr[i] = arr[minIdx];
-                    arr[minIdx] = temp;
-                }
-
-                if (maxIdx == i) {
-                    maxIdx = minIdx;
-                }
-
-                if (maxIdx != n - i - 1) {
-                    temp = arr[n - i - 1];
-                    arr[n - i - 1] = arr[maxIdx];
-                    arr[maxIdx] = temp;
-                }
-            }
-        }
-    }
-}
-
 void swap(int *a, int *b) {
     int temp = *a;
     *a = *b;
@@ -151,36 +77,6 @@ void gerarVetorAleatorio(int arr[], int n, int max_valor) {
 }
 
 int main() {
-    int n = 100000;
-    int max_valor = 100000;
-
-    int arrSerial[n];
-    int arrParalelo[n];
-
-    // Gera o vetor aleatório
-    gerarVetorAleatorio(arrSerial, n, max_valor);
-    for (int i = 0; i < n; i++) {
-        arrParalelo[i] = arrSerial[i];
-    }
-    //printArray(arrParalelo, n);
-
-    double inicio,fim;
-    inicio = omp_get_wtime();
-    selectionSortSerial(arrSerial, n);
-    fim = omp_get_wtime();
-    double t_serial = fim-inicio;
-    printf("Execucao serial: %f\n",t_serial);
-
-   // printArray(arrSerial, n);
-
-    inicio = omp_get_wtime();
-    selectionSortParalelo(arrParalelo, n);
-	fim = omp_get_wtime();
-    double t_paralelo = fim - inicio;
-	printf("Execucao paralela: %f\n",t_paralelo);
-
-    //printArray(arrParalelo, n);
-
 
     int a = 1000000;  // Teste com tamanho grande para notar diferença
     int *vet_seq = (int *)malloc(sizeof(int) * a);
