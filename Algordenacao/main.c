@@ -40,7 +40,7 @@ void quicksort_parallel(int arr[], int low, int high) {
     if (low < high) {
         int pi = partition(arr, low, high);
 
-        if ((high - low) > THRESHOLD) {  // Evita paralelismo em pequenas partições
+        if ((high - low) > THRESHOLD) {  
             #pragma omp parallel num_threads(4)
             {
                 #pragma omp single nowait
@@ -55,7 +55,7 @@ void quicksort_parallel(int arr[], int low, int high) {
                 }
             }
         } else {
-            quicksort_sequential(arr, low, high);  // Troca para versão sequencial em pequenas partições
+            quicksort_sequential(arr, low, high);  
         }
     }
 }
